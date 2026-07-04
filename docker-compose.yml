@@ -1,0 +1,22 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:17
+    container_name: aeroc_postgres
+
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: aeroc
+      POSTGRES_PASSWORD: aeroc_password
+      POSTGRES_DB: aeroc_db
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
