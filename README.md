@@ -1,170 +1,122 @@
-# AeroC V2
+# AeroC
 
-> A production-oriented environmental air quality data platform for automated collection, storage, and analytics.
+> Environmental intelligence for confident public decisions.
 
-## Overview
+AeroC is an environmental monitoring platform that turns provider air-quality snapshots into an evidence-led monitoring experience. Open-Meteo supplies the underlying model data; AeroC stores the first captured snapshot for each city and valid hour, then exposes estimated AQI, trends, history, and a map-first monitoring product.
 
-AeroC V2 is an end-to-end environmental monitoring platform designed to continuously collect air quality observations from external providers, store them in a normalized PostgreSQL database, and expose the data to analytics dashboards and downstream applications.
+## Product focus
 
-Unlike the original AeroC prototype, Version 2 separates data collection, persistence, business logic, and presentation into independent layers, allowing the platform to scale as additional monitoring locations, pollutants, and providers are introduced.
+The product answers three questions in order:
 
----
+1. Where should I look right now?
+2. What is changing?
+3. What evidence supports that interpretation?
 
-## Project Goals
+The Monitoring Overview is map-first. City Intelligence provides the detailed investigation view. Raw pollutant values remain available as evidence rather than becoming the primary interface.
 
-* Build a reliable environmental data ingestion platform.
-* Collect observations on a scheduled basis.
-* Store historical measurements in a normalized relational database.
-* Provide a stable backend for dashboards and analytics tools.
-* Support future expansion to multiple providers and pollutants.
-
----
-
-## Current Architecture
+## Architecture
 
 ```text
-                Scheduler
-                    │
-                    ▼
-         Collection Service
-                    │
-                    ▼
-         External Data Collectors
-                    │
-                    ▼
-          Domain Transformation
-                    │
-                    ▼
-            Repository Layer
-                    │
-                    ▼
-              PostgreSQL
-                    │
-        ┌───────────┴───────────┐
-        ▼                       ▼
-     REST API             BI / Dashboards
+Open-Meteo air-quality forecast
+        |
+        v
+Collector -> normalized DTO -> CollectionService -> repositories
+        |                                              |
+        +----------------------------------------------v
+                                           PostgreSQL
+                                                |
+                           AQI / trend / dashboard services
+                                                |
+                                             FastAPI
+                                                |
+                                  React monitoring dashboard
 ```
 
----
+The scheduler runs inside the FastAPI lifespan and invokes the reusable collection runner. The runner owns the transaction lifecycle; the scheduler only schedules work.
 
-## Technology Stack
-
-### Backend
-
-* Python 3.13
-* FastAPI
-* SQLAlchemy 2.x
-* Alembic
-
-### Database
-
-* PostgreSQL 18
-
-### Planned Infrastructure
-
-* APScheduler
-* Docker (optional deployment)
-* Streamlit / Power BI / Looker Studio
-
----
-
-## Repository Structure
+## Repository layout
 
 ```text
-backend/
-│
-├── alembic/
-├── app/
-│   ├── api/
-│   ├── collectors/
-│   ├── config/
-│   ├── database/
-│   ├── models/
-│   ├── repositories/
-│   ├── scheduler/
-│   └── services/
-│
-├── scripts/
-│   └── seed_data/
-│
-└── tests/
-
-dashboard/
-docs/
-docker/
+backend/                 FastAPI, SQLAlchemy, Alembic, ingestion, tests
+dashboard/               React + TypeScript + Vite monitoring application
+docs/                    Architecture and data-contract documentation
+frontend wireframe/      Approved product-design references
+docker-compose.yml       Local PostgreSQL service
 ```
 
----
+## Backend capabilities
 
-## Database Design
+- Scheduled Open-Meteo collection for active cities
+- UTC-normalized provider-valid timestamps
+- Idempotent first-snapshot persistence for `(city, observed_at, source)`
+- Normalized `cities`, `observations`, and `observation_values` schema
+- Dashboard, latest-observation, history, and trend endpoints
+- Estimated EPA-style PM2.5/PM10 AQI with explicit limitations
 
-The platform follows a normalized schema.
+### API surface
 
-* **cities** — monitored locations
-* **observations** — collection events
-* **observation_values** — pollutant measurements
+All routes are prefixed with `/api/v1`.
 
-This design supports multiple pollutants per observation without schema changes.
+- `GET /dashboard`
+- `GET /cities`
+- `GET /cities/{id}`
+- `GET /cities/{id}/latest`
+- `GET /cities/{id}/history`
+- `GET /cities/{id}/trends?days=1`
 
----
+## Important data contract
 
-## Development Roadmap
+An AeroC observation is the **first successfully collected provider forecast snapshot** for a given `(city, observed_at, source)` key. It is immutable within AeroC. Forecast revision tracking is intentionally out of scope for v1.
 
-### Milestone 1 — Platform Foundation ✅
+AQI is explicitly marked as an estimate. It is based on available PM2.5 and PM10 model observations, is not an official EPA AQI, does not apply required 24-hour or NowCast averaging, and does not include gaseous-pollutant sub-indices.
 
-* Project architecture
-* PostgreSQL integration
-* SQLAlchemy ORM
-* Alembic migrations
-* Normalized database schema
-* Repository layer
+## Local development
 
-### Milestone 2 — Data Ingestion (In Progress)
+### 1. Start PostgreSQL
 
-* Seed monitoring network
-* Repository implementation
-* Open-Meteo collector
-* Collection service
-* APScheduler integration
+```powershell
+docker compose up -d
+```
 
-### Milestone 3 — API Layer
+### 2. Configure and start the backend
 
-* Observation endpoints
-* City endpoints
-* Time-series queries
-* Filtering
+From `backend/`, create `.env` from `.env.example` and ensure its database settings match the local PostgreSQL service. Then install dependencies, migrate, seed, collect, and start FastAPI:
 
-### Milestone 4 — Analytics
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+alembic upgrade head
+python -m scripts.seed_cities
+python -m scripts.collect_once
+uvicorn app.main:app --reload
+```
 
-* Risk assessment services
-* Historical trends
-* Dashboard integration
+### 3. Start the dashboard
 
----
+From `dashboard/`:
 
-## Development Principles
+```powershell
+npm.cmd install
+npm.cmd run dev
+```
 
-* Database-first architecture
-* Repository pattern
-* Separation of concerns
-* Idempotent operational scripts
-* Version-controlled schema
-* Production-oriented design
+Vite proxies `/api` to `http://localhost:8000` during local development. Set `VITE_API_URL` when the API is hosted elsewhere; include the `/api/v1` path.
 
----
+## Verification
 
-## Project Status
+```powershell
+# Backend
+.\backend\.venv\Scripts\pytest.exe backend\tests -q
 
-Current Version:
+# Frontend
+Set-Location dashboard
+npm.cmd run build
+npm.cmd run lint
+```
 
-**v0.1.0-alpha**
+## Current status
 
-Status:
+The backend contract is frozen. Current development is frontend-first: the UI may expose concrete API friction or correctness issues, but backend changes are not made speculatively.
 
-**Core platform foundation complete. Active development continues on the ingestion pipeline.**
-
----
-
-## License
-
-This project is licensed under the MIT License.
+The frontend currently implements the Monitoring Overview and City Intelligence views against the existing API contract.
