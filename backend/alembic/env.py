@@ -5,41 +5,17 @@ from sqlalchemy import pool
 
 from alembic import context
 
+from app.config.settings import settings
 from app.database.base import Base
-
-
 from app.models.city import City
 from app.models.observation import Observation
 from app.models.observation_value import ObservationValue
 
-# this is the Alembic Config object, which provides
-# access to the values within the .ini file in use.
-import os
-from pathlib import Path
-from dotenv import load_dotenv
-
 config = context.config
-
-# backend/.env
-env_path = Path(__file__).resolve().parents[1] / ".env"
-
-print("Using .env:", env_path)
-print("Exists:", env_path.exists())
-
-load_dotenv(env_path, override=True)
-
-database_url = os.getenv("DATABASE_URL")
-print("DATABASE_URL:", repr(database_url))
-
-if not database_url:
-    raise ValueError("DATABASE_URL environment variable is not set.")
-
-config.set_main_option("sqlalchemy.url", database_url)
-
-if not database_url:
-    raise ValueError("DATABASE_URL environment variable is not set.")
-
-config.set_main_option("sqlalchemy.url", database_url)
+config.set_main_option(
+    "sqlalchemy.url",
+    settings.database_url.render_as_string(hide_password=False),
+)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

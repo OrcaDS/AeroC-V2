@@ -17,6 +17,19 @@ class CityRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
+    def get_active(self) -> list[City]:
+        """
+        Return every active monitoring city.
+        """
+
+        statement = (
+            select(City)
+            .where(City.active.is_(True))
+            .order_by(City.country, City.name)
+        )
+
+        return list(self.session.scalars(statement))
+
     def get_active_cities(self) -> list[City]:
         """
         Return all cities currently enabled for monitoring.
@@ -42,6 +55,15 @@ class CityRepository:
             select(City)
             .where(City.code == code)
         )
+
+        return self.session.scalar(statement)
+
+    def get_by_id(self, city_id: int) -> City | None:
+        """
+        Retrieve a city by its primary key.
+        """
+
+        statement = select(City).where(City.id == city_id)
 
         return self.session.scalar(statement)
 
