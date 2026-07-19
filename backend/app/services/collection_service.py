@@ -10,7 +10,6 @@ import logging
 from app.ingestion.collectors.open_meteo import OpenMeteoCollector
 from app.models.observation import Observation
 from app.models.observation_value import ObservationValue
-from app.repositories.city_repository import CityRepository
 from app.repositories.observation_repository import ObservationRepository
 
 logger = logging.getLogger(__name__)
@@ -21,37 +20,16 @@ class CollectionService:
 
     def __init__(
         self,
-        city_repository: CityRepository,
         observation_repository: ObservationRepository,
         collector: OpenMeteoCollector,
         run_id: str | None = None,
     ) -> None:
 
-        self.city_repository = city_repository
         self.observation_repository = observation_repository
         self.collector = collector
         self.run_id = run_id
 
-    def collect_all(self) -> None:
-        cities = self.city_repository.get_active()
-
-        logger.info(
-            "event=collection_batch_loaded run_id=%s city_count=%s provider=%s",
-            self.run_id,
-            len(cities),
-            self.collector.__class__.__name__,
-            extra={
-                "event": "collection_batch_loaded",
-                "run_id": self.run_id,
-                "city_count": len(cities),
-                "provider": self.collector.__class__.__name__,
-            },
-        )
-
-        for city in cities:
-            self.collect_city(city)
-            
-    def collect_city(self, city) -> None:
+    def collect_city(self, city) -> bool:
         """
         Collect and persist observations for a single city.
         """
@@ -114,3 +92,4 @@ class CollectionService:
                 "pollutant_count": len(result.values),
             },
         )
+        return created

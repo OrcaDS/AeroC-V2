@@ -45,3 +45,8 @@ Thumbs.db
 
 HANDOFF.md
 HANDOFF_UPDATED.md
+
+# Local release verification artifacts
+
+staging-evidence/
+.release-verification/

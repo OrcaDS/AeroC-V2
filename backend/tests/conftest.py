@@ -8,7 +8,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.api.dependencies import get_db
+from app.config.settings import settings
 from app.database.base import Base
+
+# API tests do not own the production scheduler. Scheduler lifecycle has a
+# dedicated test module and must never make live provider/database calls here.
+settings.AEROC_PROCESS_ROLE = "api"
+
 from app.main import app
 from app.models.city import City
 from app.models.observation import Observation

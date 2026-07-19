@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from types import SimpleNamespace
 
-import pytest
-
+from app.ingestion.collectors.open_meteo import CollectionCancelledError
 from app.runtime.collection_runner import CollectionRunner
 
 
@@ -25,59 +24,72 @@ class FakeSession:
 
 
 class FakeService:
-    def __init__(self, should_fail: bool = False) -> None:
-        self.should_fail = should_fail
-        self.called = False
+    def __init__(self, outcome: bool | Exception = True) -> None:
+        self.outcome = outcome
 
-    def collect_all(self) -> None:
-        self.called = True
-        if self.should_fail:
-            raise RuntimeError("boom")
+    def collect_city(self, city) -> bool:
+        if isinstance(self.outcome, Exception):
+            raise self.outcome
+        return self.outcome
 
 
-def test_collection_runner_commits_and_closes_session(caplog: pytest.LogCaptureFixture) -> None:
-    session = FakeSession()
-    service = FakeService()
+class TestRunner(CollectionRunner):
+    __test__ = False
+
+    def __init__(self, cities, services, sessions):
+        super().__init__(session_factory=lambda: sessions.pop(0))
+        self.cities = cities
+        self.services = services
+
+    def _load_active_cities(self):
+        return self.cities
+
+    def _build_service(self, current_session, run_id: str):
+        assert run_id
+        return self.services.pop(0)
+
+
+def test_collection_runner_uses_independent_city_transactions(caplog) -> None:
+    cities = [
+        SimpleNamespace(id=1, name="Manila"),
+        SimpleNamespace(id=2, name="Quezon City"),
+        SimpleNamespace(id=3, name="Makati"),
+    ]
+    sessions = [FakeSession(), FakeSession(), FakeSession()]
+    retained_sessions = list(sessions)
+    services = [FakeService(True), FakeService(RuntimeError("boom")), FakeService(False)]
     caplog.set_level(logging.INFO)
 
-    class TestRunner(CollectionRunner):
-        def _build_service(self, current_session, run_id: str):
-            assert current_session is session
-            assert run_id
-            return service
+    result = TestRunner(cities, services, sessions).run_once()
 
-    runner = TestRunner(session_factory=lambda: session)
-
-    result = runner.run_once()
-
-    assert service.called is True
-    assert session.committed is True
-    assert session.rolled_back is False
-    assert session.closed is True
-    assert result.run_id
-    assert result.started_at <= datetime.now(timezone.utc)
-    assert "event=collection_cycle_started" in caplog.text
-    assert "event=collection_cycle_succeeded" in caplog.text
+    assert result.status == "partial"
+    assert result.succeeded_cities == 2
+    assert result.failed_cities == 1
+    assert result.duplicate_cities == 1
+    assert retained_sessions[0].committed is True
+    assert retained_sessions[1].rolled_back is True
+    assert retained_sessions[2].committed is True
+    assert all(session.closed for session in retained_sessions)
+    assert "event=city_collection_failed" in caplog.text
+    assert "event=collection_cycle_partial" in caplog.text
 
 
-def test_collection_runner_rolls_back_and_reraises(caplog: pytest.LogCaptureFixture) -> None:
-    session = FakeSession()
-    service = FakeService(should_fail=True)
-    caplog.set_level(logging.INFO)
+def test_collection_runner_stops_cooperatively_on_cancellation() -> None:
+    cities = [
+        SimpleNamespace(id=1, name="Manila"),
+        SimpleNamespace(id=2, name="Quezon City"),
+    ]
+    sessions = [FakeSession(), FakeSession()]
+    retained_sessions = list(sessions)
+    services = [
+        FakeService(CollectionCancelledError("shutdown")),
+        FakeService(True),
+    ]
 
-    class TestRunner(CollectionRunner):
-        def _build_service(self, current_session, run_id: str):
-            assert current_session is session
-            assert run_id
-            return service
+    result = TestRunner(cities, services, sessions).run_once()
 
-    runner = TestRunner(session_factory=lambda: session)
-
-    with pytest.raises(RuntimeError, match="boom"):
-        runner.run_once()
-
-    assert service.called is True
-    assert session.committed is False
-    assert session.rolled_back is True
-    assert session.closed is True
-    assert "event=collection_cycle_failed" in caplog.text
+    assert result.status == "cancelled"
+    assert result.cancelled is True
+    assert retained_sessions[0].rolled_back is True
+    assert retained_sessions[0].closed is True
+    assert retained_sessions[1].closed is False

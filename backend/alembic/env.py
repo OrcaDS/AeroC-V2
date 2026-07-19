@@ -1,6 +1,6 @@
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config
+from sqlalchemy import create_engine
 from sqlalchemy import pool
 
 from alembic import context
@@ -12,10 +12,6 @@ from app.models.observation import Observation
 from app.models.observation_value import ObservationValue
 
 config = context.config
-config.set_main_option(
-    "sqlalchemy.url",
-    settings.database_url.render_as_string(hide_password=False),
-)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
@@ -46,9 +42,8 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = config.get_main_option("sqlalchemy.url")
     context.configure(
-        url=url,
+        url=settings.database_url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -65,10 +60,10 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
+    connectable = create_engine(
+        settings.database_url,
         poolclass=pool.NullPool,
+        connect_args=settings.database_connect_args,
     )
 
     with connectable.connect() as connection:

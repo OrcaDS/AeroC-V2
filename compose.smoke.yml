@@ -1,0 +1,131 @@
+x-backend-environment: &backend-environment
+  AEROC_ENV: test
+  AEROC_PROCESS_ROLE: api_scheduler
+  AEROC_WEB_WORKERS: "1"
+  AEROC_INSTANCE_ID: gate7-api-scheduler-1
+  LOG_LEVEL: INFO
+  LOG_FORMAT: text
+  SHUTDOWN_GRACE_SECONDS: "90"
+  API_TITLE: AeroC API
+  API_VERSION: 1.0.0
+  DATABASE_HOST: postgres
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: aeroc_smoke
+  DATABASE_USER: aeroc_smoke
+  DATABASE_PASSWORD: gate7-smoke-password-only
+  DATABASE_SSLMODE: disable
+  DATABASE_CONNECT_TIMEOUT_SECONDS: "3"
+  DATABASE_POOL_SIZE: "3"
+  DATABASE_MAX_OVERFLOW: "2"
+  DATABASE_POOL_TIMEOUT_SECONDS: "3"
+  DATABASE_POOL_RECYCLE_SECONDS: "60"
+  DATABASE_STATEMENT_TIMEOUT_MS: "10000"
+  DATABASE_LOCK_TIMEOUT_MS: "3000"
+  DATABASE_APPLICATION_NAME: aeroc-gate7
+  HEALTH_DATABASE_TIMEOUT_SECONDS: "2"
+  COLLECTION_INTERVAL_MINUTES: "1"
+  COLLECTION_RUN_ON_STARTUP: "true"
+  SCHEDULER_MISFIRE_GRACE_SECONDS: "30"
+  COLLECTION_STARTUP_GRACE_SECONDS: "30"
+  COLLECTION_STALE_AFTER_MINUTES: "5"
+  OPEN_METEO_BASE_URL: http://mock-open-meteo:8081/v1/air-quality
+  OPEN_METEO_TIMEOUT_SECONDS: "2"
+  OPEN_METEO_MAX_ATTEMPTS: "2"
+  OPEN_METEO_RETRY_BASE_SECONDS: "0.1"
+  OPEN_METEO_RETRY_MAX_SECONDS: "0.2"
+
+x-backend-service: &backend-service
+  image: aeroc-gate7-backend:local
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+  environment: *backend-environment
+  depends_on:
+    postgres:
+      condition: service_healthy
+    mock-open-meteo:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: aeroc_smoke
+      POSTGRES_USER: aeroc_smoke
+      POSTGRES_PASSWORD: gate7-smoke-password-only
+    ports:
+      - "127.0.0.1:55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aeroc_smoke -d aeroc_smoke"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    volumes:
+      - gate7_postgres_data:/var/lib/postgresql/data
+      - ./backend/tests/smoke:/smoke:ro
+
+  mock-open-meteo:
+    image: aeroc-gate7-backend:local
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["python", "tests/smoke/mock_open_meteo.py"]
+    environment:
+      MOCK_OPEN_METEO_PORT: "8081"
+    ports:
+      - "127.0.0.1:18081:8081"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8081/health', timeout=1)",
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  migrate:
+    <<: *backend-service
+    command: ["alembic", "upgrade", "head"]
+
+  seed:
+    <<: *backend-service
+    command: ["python", "-m", "scripts.seed_cities"]
+
+  collect:
+    <<: *backend-service
+    command: ["python", "-m", "scripts.collect_once"]
+
+  api:
+    <<: *backend-service
+    command:
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--workers",
+        "1",
+      ]
+    ports:
+      - "127.0.0.1:18080:8000"
+    restart: "no"
+    stop_grace_period: 120s
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=3)",
+        ]
+      interval: 2s
+      timeout: 4s
+      retries: 30
+
+volumes:
+  gate7_postgres_data:
