@@ -19,6 +19,15 @@ def test_epa_us_aqi_calculates_pm25_sub_index():
     assert assessment.computed_pollutants == ("pm2_5",)
 
 
+def test_epa_us_aqi_accepts_open_meteo_unicode_mass_units():
+    assessment = EpaUsAqiCalculator().calculate(
+        {"pm2_5": PollutantReading(value=24.5, unit="μg/m³")}
+    )
+
+    assert assessment.value == 80
+    assert assessment.primary_pollutant == "pm2_5"
+
+
 def test_epa_us_aqi_chooses_highest_pm_sub_index():
     calculator = EpaUsAqiCalculator()
 

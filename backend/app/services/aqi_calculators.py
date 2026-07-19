@@ -139,7 +139,7 @@ class EpaUsAqiCalculator:
         breakpoints: tuple[_Breakpoint, ...],
         truncate_decimals: int,
     ) -> AqiSubIndex | None:
-        if reading.value is None or reading.unit != expected_unit:
+        if reading.value is None or self._normalize_unit(reading.unit) != expected_unit:
             return None
 
         truncated_value = self._truncate(reading.value, truncate_decimals)
@@ -168,6 +168,23 @@ class EpaUsAqiCalculator:
     def _truncate(value: float, decimals: int) -> float:
         factor = 10**decimals
         return trunc(value * factor) / factor
+
+    @staticmethod
+    def _normalize_unit(unit: str) -> str:
+        """Accept provider and legacy Unicode spellings of micrograms per m³.
+
+        Open-Meteo returns ``μg/m³`` while early AeroC tests and persisted
+        records may use ``ug/m3``. AQI calculation is unit-sensitive, but these
+        spellings represent the same concentration unit.
+        """
+        return (
+            unit.strip()
+            .lower()
+            .replace("μ", "u")
+            .replace("µ", "u")
+            .replace("³", "3")
+            .replace(" ", "")
+        )
 
     @staticmethod
     def _find_breakpoint(
