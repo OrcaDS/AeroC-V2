@@ -13,7 +13,7 @@ export type AqiAssessment = {
   primary_pollutant: string | null
 }
 
-export type PollutantValue = { value: number | null; unit: string }
+export type PollutantValue = { value: number | null; unit: string | null }
 
 export type City = {
   id: number
@@ -36,10 +36,19 @@ export type DashboardCity = {
 }
 
 export type Dashboard = {
+  generated_at: string
   summary: {
     cities_monitored: number
     cities_with_current_data: number
     last_observed_at: string | null
+    average_pm2_5: PollutantValue
+    average_pm10: PollutantValue
+  }
+  leaders: {
+    highest_pm2_5: { city_id: number; city_name: string; value: number; unit: string | null; observed_at: string } | null
+    highest_pm10: { city_id: number; city_name: string; value: number; unit: string | null; observed_at: string } | null
+    highest_ozone: { city_id: number; city_name: string; value: number; unit: string | null; observed_at: string } | null
+    highest_aqi: { city_id: number; city_name: string; observed_at: string; aqi: AqiAssessment } | null
   }
   cities: DashboardCity[]
 }
@@ -66,14 +75,24 @@ export type CityTrends = { trends: Record<string, PollutantTrend> }
 
 const apiRoot = import.meta.env.VITE_API_URL ?? '/api/v1'
 
-async function request<T>(path: string): Promise<T> {
-  const response = await fetch(`${apiRoot}${path}`)
-  if (!response.ok) throw new Error(`AeroC API returned ${response.status}`)
+export class ApiRequestError extends Error {
+  readonly status: number
+
+  constructor(status: number) {
+    super(`AeroC API returned ${status}`)
+    this.name = 'ApiRequestError'
+    this.status = status
+  }
+}
+
+async function request<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(`${apiRoot}${path}`, { signal })
+  if (!response.ok) throw new ApiRequestError(response.status)
   return response.json() as Promise<T>
 }
 
 export const api = {
-  dashboard: () => request<Dashboard>('/dashboard'),
-  latest: (cityId: number) => request<LatestObservation>(`/cities/${cityId}/latest`),
-  trends: (cityId: number) => request<CityTrends>(`/cities/${cityId}/trends?days=1`),
+  dashboard: (signal?: AbortSignal) => request<Dashboard>('/dashboard', signal),
+  latest: (cityId: number, signal?: AbortSignal) => request<LatestObservation>(`/cities/${cityId}/latest`, signal),
+  trends: (cityId: number, signal?: AbortSignal) => request<CityTrends>(`/cities/${cityId}/trends?days=1`, signal),
 }

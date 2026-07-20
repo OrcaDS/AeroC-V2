@@ -43,8 +43,18 @@ dist/
 .DS_Store
 Thumbs.db
 
+# Local agent and skill tooling
+
+.agents/
+.codex/
+skills-lock.json
+
+# Internal handoffs, operational notes, and proprietary design references
+
 HANDOFF.md
 HANDOFF_UPDATED.md
+docs/operations/
+frontend wireframe/
 
 # Local release verification artifacts
 

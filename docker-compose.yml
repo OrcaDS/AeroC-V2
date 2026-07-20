@@ -1,22 +1,101 @@
-version: "3.9"
+x-backend-environment: &backend-environment
+  AEROC_ENV: ${AEROC_ENV:-development}
+  AEROC_PROCESS_ROLE: api
+  AEROC_WEB_WORKERS: "1"
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  LOG_FORMAT: ${LOG_FORMAT:-text}
+  SHUTDOWN_GRACE_SECONDS: "90"
+  DATABASE_HOST: postgres
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: ${AEROC_DATABASE_NAME:-aeroc_db}
+  DATABASE_USER: ${AEROC_DATABASE_USER:-aeroc}
+  DATABASE_PASSWORD: ${AEROC_DATABASE_PASSWORD:-aeroc_password}
+  DATABASE_SSLMODE: ${DATABASE_SSLMODE:-disable}
+  DATABASE_APPLICATION_NAME: aeroc-compose
+  COLLECTION_INTERVAL_MINUTES: ${COLLECTION_INTERVAL_MINUTES:-60}
+  COLLECTION_RUN_ON_STARTUP: ${COLLECTION_RUN_ON_STARTUP:-true}
+  OPEN_METEO_BASE_URL: ${OPEN_METEO_BASE_URL:-https://air-quality-api.open-meteo.com/v1/air-quality}
+
+x-backend-service: &backend-service
+  image: aeroc-backend:local
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+  environment: *backend-environment
 
 services:
   postgres:
     image: postgres:17
-    container_name: aeroc_postgres
-
     restart: unless-stopped
-
     environment:
-      POSTGRES_USER: aeroc
-      POSTGRES_PASSWORD: aeroc_password
-      POSTGRES_DB: aeroc_db
-
-    ports:
-      - "5432:5432"
-
+      POSTGRES_DB: ${AEROC_DATABASE_NAME:-aeroc_db}
+      POSTGRES_USER: ${AEROC_DATABASE_USER:-aeroc}
+      POSTGRES_PASSWORD: ${AEROC_DATABASE_PASSWORD:-aeroc_password}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${AEROC_DATABASE_USER:-aeroc} -d ${AEROC_DATABASE_NAME:-aeroc_db}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  migrate:
+    <<: *backend-service
+    command:
+      [
+        "/bin/sh",
+        "-c",
+        "alembic upgrade head && python -m scripts.seed_cities",
+      ]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *backend-service
+    environment:
+      <<: *backend-environment
+      AEROC_PROCESS_ROLE: api_scheduler
+      AEROC_INSTANCE_ID: aeroc-compose-api-scheduler-1
+      AEROC_WEB_WORKERS: "1"
+    command:
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--workers",
+        "1",
+      ]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${AEROC_API_PORT:-8000}:8000"
+    restart: unless-stopped
+    stop_grace_period: 120s
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 10s
 
 volumes:
   postgres_data:
